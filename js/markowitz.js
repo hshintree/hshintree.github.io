@@ -29,6 +29,31 @@ function stdDev(arr) {
   return Math.sqrt(variance);
 }
 
+function rankArray(arr) {
+  const sorted = [...arr].map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const ranks = new Array(arr.length);
+  sorted.forEach(({ i }, rank) => { ranks[i] = rank + 1; });
+  return ranks;
+}
+
+function pearsonCorr(x, y) {
+  const n = x.length;
+  if (n < 2) return NaN;
+  const mx = x.reduce((s, v) => s + v, 0) / n;
+  const my = y.reduce((s, v) => s + v, 0) / n;
+  let num = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - mx, dy = y[i] - my;
+    num += dx * dy; vx += dx * dx; vy += dy * dy;
+  }
+  const den = Math.sqrt(vx * vy);
+  return den < 1e-12 ? NaN : num / den;
+}
+
+function spearmanCorr(x, y) {
+  return pearsonCorr(rankArray(x), rankArray(y));
+}
+
 /** Clip a value to [lo, hi] */
 function clip(x, lo, hi) {
   return Math.max(lo, Math.min(hi, x));
@@ -567,6 +592,7 @@ async function runBacktest(params) {
 
   // Portfolio value series (starts at 1.0)
   const pvPortfolio = [1.0];
+  const predMuLog   = []; // { date, tIdx, mu[], vol[] } at each rebalance
   const pvSpy       = [1.0];
   const pvEW        = [1.0];
 
@@ -593,6 +619,11 @@ async function runBacktest(params) {
           const muRaw    = ewmaMean(histRets, muHalflife);
           const muEff    = shrinkMu(muRaw, shrinkage);
           currentWeights = solveMarkowitz(muEff, sigmaAnn, gamma, maxWt, rfRate);
+          predMuLog.push({
+            date: d, tIdx: t,
+            mu:  [...muEff],
+            vol: validSymbols.map((_, j) => Math.sqrt(Math.max(0, sigmaAnn[j][j]))),
+          });
         } catch (_) {
           // Keep previous weights if optimisation fails
         }
@@ -618,6 +649,24 @@ async function runBacktest(params) {
 
   onProgress('Backtest complete.');
 
+  // Compute realized forward μ and vol for each recorded rebalance period
+  const realMuLog = predMuLog.map((entry, i) => {
+    const startT = entry.tIdx;
+    const endT   = (i + 1 < predMuLog.length) ? predMuLog[i + 1].tIdx : portRets.length;
+    const nDays  = endT - startT;
+    if (nDays <= 0) return { date: entry.date, mu: new Array(N).fill(NaN), vol: new Array(N).fill(NaN) };
+    const mu = validSymbols.map((_, j) => {
+      let cum = 0;
+      for (let k = startT; k < endT; k++) cum += portRets[k][j];
+      return cum * (252 / nDays);
+    });
+    const vol = validSymbols.map((_, j) => {
+      const slice = portRets.slice(startT, endT).map(r => r[j]);
+      return stdDev(slice) * Math.sqrt(252);
+    });
+    return { date: entry.date, mu, vol };
+  });
+
   return {
     pvPortfolio,
     pvSpy,
@@ -625,6 +674,8 @@ async function runBacktest(params) {
     wtsHistory,
     dates: [dates[0], ...retDates],
     symbols: validSymbols,
+    predMuLog,
+    realMuLog,
   };
 }
 
@@ -661,6 +712,55 @@ function computeStats(pvSeries, rfRate = 0.045) {
   }
 
   return { annReturn, annVol, sharpe, maxDD };
+}
+
+/* ================================================================
+   8b. Forecast accuracy
+   ================================================================ */
+
+function computeForecastAccuracy(predMuLog, realMuLog, symbols) {
+  const nPeriods = Math.min(predMuLog.length, realMuLog.length) - 1; // exclude last (no forward realized)
+  if (nPeriods < 3) return null;
+
+  const pred = predMuLog.slice(0, nPeriods);
+  const real = realMuLog.slice(0, nPeriods);
+
+  // Spearman IC per rebalance date (cross-sectional rank correlation)
+  const icSeries = pred.map((p, i) => {
+    const x = p.mu, y = real[i].mu;
+    if (x.some(v => !isFinite(v)) || y.some(v => !isFinite(v))) return null;
+    return { date: p.date, ic: spearmanCorr(x, y) };
+  }).filter(Boolean);
+
+  const meanIC = icSeries.length > 0
+    ? icSeries.reduce((s, x) => s + x.ic, 0) / icSeries.length
+    : NaN;
+
+  // Per-asset accuracy stats
+  const perAsset = symbols.map((sym, j) => {
+    const mu_pairs  = pred.map((p, i) => [p.mu[j],  real[i].mu[j]])
+                         .filter(([p, r]) => isFinite(p) && isFinite(r));
+    const vol_pairs = pred.map((p, i) => [p.vol[j], real[i].vol[j]])
+                         .filter(([p, r]) => isFinite(p) && isFinite(r) && r > 0);
+    const n = mu_pairs.length;
+    if (n === 0) return { sym, bias: NaN, mae: NaN, hitRate: NaN, r: NaN, volRatio: NaN };
+    const bias    = mu_pairs.reduce((s, [p, r]) => s + (p - r), 0) / n;
+    const mae     = mu_pairs.reduce((s, [p, r]) => s + Math.abs(p - r), 0) / n;
+    const hitRate = mu_pairs.filter(([p, r]) => (p >= 0) === (r >= 0)).length / n;
+    const r       = pearsonCorr(mu_pairs.map(x => x[0]), mu_pairs.map(x => x[1]));
+    const volRatio = vol_pairs.length > 0
+      ? vol_pairs.reduce((s, [p, rv]) => s + p / rv, 0) / vol_pairs.length
+      : NaN;
+    return { sym, bias, mae, hitRate, r, volRatio, n };
+  });
+
+  // All (pred, real) scatter points for μ plot
+  const scatterPoints = symbols.flatMap((sym, j) =>
+    pred.map((p, i) => ({ x: p.mu[j], y: real[i].mu[j], sym }))
+        .filter(pt => isFinite(pt.x) && isFinite(pt.y))
+  );
+
+  return { icSeries, perAsset, scatterPoints, meanIC };
 }
 
 /* ================================================================
@@ -895,10 +995,154 @@ function renderWeightsHeatmap(canvas, wtsHistory, symbols, maxWt) {
 
   ctx.fillStyle = '#475569';
   ctx.font = '7px Inter, system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Weight:', legendX - 2, legendY + legendH / 2);
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillText('0%', legendX, legendY + legendH + 2);
+  ctx.textAlign = 'center';
+  ctx.fillText(fmtPct(maxWt / 2, 0), legendX + legendW / 2, legendY + legendH + 2);
   ctx.textAlign = 'right';
   ctx.fillText(fmtPct(maxWt, 0), legendX + legendW, legendY + legendH + 2);
+}
+
+/** Render current allocation as CSS progress bars */
+function renderLiveWeights(wtsHistory, symbols, maxWt) {
+  const panel   = document.getElementById('live-weights-body');
+  const dateLbl = document.getElementById('live-weights-date');
+  if (!panel || wtsHistory.length === 0) return;
+
+  const latest = wtsHistory[wtsHistory.length - 1];
+  if (dateLbl) dateLbl.textContent = 'As of ' + latest.date.slice(0, 10);
+
+  const entries = symbols
+    .map((sym, j) => ({ sym, w: latest.weights[j] || 0 }))
+    .filter(e => e.w > 0.005)
+    .sort((a, b) => b.w - a.w);
+
+  panel.innerHTML = entries.map(({ sym, w }) => {
+    const pct  = (w * 100).toFixed(1);
+    const barW = Math.min(100, (w / maxWt) * 100).toFixed(1);
+    return `<div class="lw-row">
+      <span class="lw-sym">${sym}</span>
+      <div class="lw-bar-wrap"><div class="lw-bar" style="width:${barW}%"></div></div>
+      <span class="lw-pct">${pct}%</span>
+    </div>`;
+  }).join('');
+}
+
+/** Render forecast accuracy stats table */
+function renderAccuracyTable(perAsset) {
+  const tbody = document.getElementById('acc-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = perAsset.map(({ sym, bias, mae, hitRate, r, volRatio }) => {
+    const biasCls = isFinite(bias) ? (bias > 0 ? 'acc-pos' : 'acc-neg') : '';
+    const rCls    = isFinite(r)    ? (r    > 0 ? 'acc-pos' : 'acc-neg') : '';
+    return `<tr>
+      <td class="acc-sym">${sym}</td>
+      <td class="${biasCls}">${isFinite(bias) ? fmtPct(bias) : '—'}</td>
+      <td>${isFinite(mae) ? fmtPct(mae) : '—'}</td>
+      <td>${isFinite(hitRate) ? fmtPct(hitRate, 0) : '—'}</td>
+      <td class="${rCls}">${isFinite(r) ? r.toFixed(3) : '—'}</td>
+      <td>${isFinite(volRatio) ? volRatio.toFixed(2) + '×' : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+let icChartInstance  = null;
+let muScatterInstance = null;
+
+/** IC over time bar chart */
+function renderIcChart(icSeries, meanIC) {
+  const canvas = document.getElementById('ic-chart');
+  if (!canvas) return;
+  if (icChartInstance) { icChartInstance.destroy(); icChartInstance = null; }
+
+  icChartInstance = new Chart(canvas.getContext('2d'), {
+    data: {
+      labels: icSeries.map(x => x.date.slice(0, 7)),
+      datasets: [
+        {
+          type: 'line',
+          label: `Mean IC ${isFinite(meanIC) ? meanIC.toFixed(3) : ''}`,
+          data: icSeries.map(() => meanIC),
+          borderColor: '#f59e0b',
+          borderDash: [5, 4],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          order: 0,
+        },
+        {
+          type: 'bar',
+          label: 'IC (Spearman)',
+          data: icSeries.map(x => x.ic),
+          backgroundColor: icSeries.map(x => x.ic >= 0 ? 'rgba(37,99,235,0.75)' : 'rgba(220,38,38,0.75)'),
+          borderWidth: 0,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 9 }, boxWidth: 12, padding: 8 } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(3)}` } },
+      },
+      scales: {
+        x: { ticks: { font: { size: 9 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 8 }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { font: { size: 9 } }, grid: { color: '#f1f5f9' },
+             title: { display: true, text: 'Spearman IC', font: { size: 9 } } },
+      },
+    },
+  });
+}
+
+/** Predicted vs realized μ scatter */
+function renderMuScatter(scatterPoints, symbols) {
+  const canvas = document.getElementById('mu-scatter');
+  if (!canvas) return;
+  if (muScatterInstance) { muScatterInstance.destroy(); muScatterInstance = null; }
+
+  const COLORS = ['#2563eb','#dc2626','#16a34a','#d97706','#7c3aed',
+                  '#0891b2','#db2777','#65a30d','#9333ea','#ea580c'];
+  const bySymbol = {};
+  for (const pt of scatterPoints) (bySymbol[pt.sym] = bySymbol[pt.sym] || []).push({ x: pt.x, y: pt.y });
+
+  const lim = scatterPoints.reduce((m, p) => Math.max(m, Math.abs(p.x), Math.abs(p.y)), 0.1) * 1.15;
+
+  muScatterInstance = new Chart(canvas.getContext('2d'), {
+    data: {
+      datasets: [
+        { type: 'line', label: 'Perfect', data: [{ x: -lim, y: -lim }, { x: lim, y: lim }],
+          borderColor: '#f59e0b', borderDash: [4, 3], borderWidth: 1.2,
+          pointRadius: 0, order: 0 },
+        ...Object.entries(bySymbol).map(([sym, pts], i) => ({
+          type: 'scatter',
+          label: sym,
+          data: pts,
+          backgroundColor: COLORS[i % COLORS.length] + '60',
+          pointRadius: 4,
+          order: 1,
+        })),
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+        tooltip: { callbacks: {
+          label: ctx => ` ${ctx.dataset.label}: pred ${ctx.parsed.x.toFixed(2)}, real ${ctx.parsed.y.toFixed(2)}`,
+        }},
+      },
+      scales: {
+        x: { min: -lim, max: lim, ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
+             title: { display: true, text: 'Predicted μ (ann.)', font: { size: 9 } }, grid: { color: '#f1f5f9' } },
+        y: { min: -lim, max: lim, ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
+             title: { display: true, text: 'Realized μ (ann.)', font: { size: 9 } }, grid: { color: '#f1f5f9' } },
+      },
+    },
+  });
 }
 
 /* ================================================================
@@ -1093,7 +1337,8 @@ async function runBacktestUI() {
       onProgress: msg => setStatus(msg, ''),
     });
 
-    const { pvPortfolio, pvSpy, pvEW, wtsHistory, dates, symbols: validSymbols } = result;
+    const { pvPortfolio, pvSpy, pvEW, wtsHistory, dates, symbols: validSymbols,
+            predMuLog, realMuLog } = result;
 
     // ── Compute stats ──────────────────────────────────────────
     const statsPort = computeStats(pvPortfolio);
@@ -1106,6 +1351,9 @@ async function runBacktestUI() {
     setStat('stat-dd',     fmtPct(statsPort.maxDD),     true);
     setStat('stat-vol',    fmtPct(statsPort.annVol),    false);
 
+    // ── Live weights panel ─────────────────────────────────────
+    renderLiveWeights(wtsHistory, validSymbols, maxWt);
+
     // ── Render pv chart ────────────────────────────────────────
     renderPvChart({
       labels:    dates,
@@ -1117,6 +1365,16 @@ async function runBacktestUI() {
     // ── Render heatmap ─────────────────────────────────────────
     const heatCanvas = document.getElementById('wts-canvas');
     renderWeightsHeatmap(heatCanvas, wtsHistory, validSymbols, maxWt);
+
+    // ── Forecast accuracy ──────────────────────────────────────
+    const accSection = document.getElementById('acc-section');
+    const accuracy = computeForecastAccuracy(predMuLog, realMuLog, validSymbols);
+    if (accuracy && accSection) {
+      renderAccuracyTable(accuracy.perAsset);
+      renderIcChart(accuracy.icSeries, accuracy.meanIC);
+      renderMuScatter(accuracy.scatterPoints, validSymbols);
+      accSection.style.display = 'flex';
+    }
 
     // ── Show results ───────────────────────────────────────────
     resultsSection.classList.add('visible');
