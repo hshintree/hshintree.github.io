@@ -1,0 +1,12 @@
+name            = "markowitz-data"
+main            = "worker.js"
+compatibility_date = "2024-09-23"
+
+# After running `wrangler kv namespace create PRICE_CACHE`, paste the ID below
+[[kv_namespaces]]
+binding = "PRICE_CACHE"
+id      = "db5b42b28dce4376abb70e6296e2b570"
+
+# Secrets are NOT stored here — set them with:
+#   wrangler secret put ALPACA_KEY
+#   wrangler secret put ALPACA_SECRET

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Markowitz Engine — Hakeem Shindy</title>
+  <meta name="description" content="Interactive walk-forward Markowitz portfolio optimizer. Tune gamma, shrinkage, rebalance frequency, and asset universe." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Design tokens ─────────────────────────────────────────── */
+    :root {
+      --bg:           #ffffff;
+      --bg-alt:       #f8fafc;
+      --bg-panel:     #f1f5f9;
+      --text:         #0f172a;
+      --text-muted:   #475569;
+      --accent:       #2563eb;
+      --accent-dark:  #1d4ed8;
+      --accent-light: #eff6ff;
+      --border:       #e2e8f0;
+      --radius:       6px;
+      --mono:         'JetBrains Mono', 'Courier New', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Page header ───────────────────────────────────────────── */
+    .page-header {
+      background: #0f172a;
+      color: #fff;
+      padding: 1.25rem 1.5rem 1.5rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      color: #94a3b8;
+      font-size: .8125rem;
+      font-weight: 500;
+      margin-bottom: .75rem;
+      transition: color .15s;
+    }
+    .back-link:hover { color: #fff; text-decoration: none; }
+    .back-link svg { width: 14px; height: 14px; }
+
+    .page-header h1 {
+      font-size: clamp(1.375rem, 3vw, 2rem);
+      font-weight: 700;
+      letter-spacing: -.02em;
+    }
+    .page-header .subtitle {
+      margin-top: .35rem;
+      color: #93c5fd;
+      font-size: .875rem;
+      font-weight: 400;
+    }
+
+    /* ── Main layout ───────────────────────────────────────────── */
+    .main-layout {
+      display: flex;
+      flex: 1;
+      gap: 0;
+      align-items: flex-start;
+    }
+
+    /* ── Controls panel ────────────────────────────────────────── */
+    .controls-panel {
+      width: 400px;
+      min-width: 320px;
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      position: sticky;
+      top: 0;
+      max-height: 100vh;
+      overflow-y: auto;
+    }
+
+    .ctrl-group { display: flex; flex-direction: column; gap: .45rem; }
+    .ctrl-group label {
+      font-size: .8125rem;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: .01em;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .ctrl-group .hint {
+      font-size: .75rem;
+      color: var(--text-muted);
+      margin-top: -.2rem;
+    }
+
+    /* Asset search + list */
+    #asset-search {
+      width: 100%;
+      padding: .45rem .65rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .8125rem;
+      font-family: inherit;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s;
+    }
+    #asset-search:focus { border-color: var(--accent); }
+
+    #asset-list {
+      width: 100%;
+      height: 160px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .8125rem;
+      font-family: inherit;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+      padding: .25rem 0;
+    }
+    #asset-list:focus { border-color: var(--accent); }
+    #asset-list option { padding: .25rem .65rem; }
+    #asset-list option:checked {
+      background: var(--accent-light);
+      color: var(--accent-dark);
+    }
+
+    .asset-btn-row {
+      display: flex;
+      gap: .5rem;
+    }
+    .btn-sm {
+      flex: 1;
+      padding: .35rem .5rem;
+      font-size: .75rem;
+      font-weight: 600;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #fff;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .btn-sm:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
+
+    /* Range sliders */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--accent);
+    }
+    .slider-val {
+      font-size: .8125rem;
+      font-weight: 600;
+      color: var(--accent);
+      min-width: 3rem;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Select + date */
+    select, input[type="date"] {
+      width: 100%;
+      padding: .45rem .65rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .8125rem;
+      font-family: inherit;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s;
+    }
+    select:focus, input[type="date"]:focus { border-color: var(--accent); }
+
+    .date-row { display: flex; gap: .75rem; }
+    .date-row .ctrl-group { flex: 1; }
+
+    /* Run button */
+    #run-btn {
+      width: 100%;
+      padding: .75rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: .9375rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .15s;
+      letter-spacing: .01em;
+    }
+    #run-btn:hover { background: var(--accent-dark); }
+    #run-btn:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    /* Status */
+    #status {
+      font-size: .8rem;
+      font-family: var(--mono);
+      color: var(--text-muted);
+      min-height: 1.4rem;
+      line-height: 1.5;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .5rem .65rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #status.error { color: #dc2626; border-color: #fca5a5; background: #fff5f5; }
+    #status.success { color: #15803d; border-color: #86efac; background: #f0fdf4; }
+
+    /* ── Results area ──────────────────────────────────────────── */
+    .results-area {
+      flex: 1;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      overflow-x: hidden;
+    }
+
+    /* Fade-in animation */
+    #results-section {
+      display: none;
+      flex-direction: column;
+      gap: 1.5rem;
+      animation: fadeIn .4s ease;
+    }
+    #results-section.visible { display: flex; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Stat cards */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: .75rem;
+    }
+    @media (max-width: 800px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+
+    .stat-card {
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .9rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: .2rem;
+    }
+    .stat-label {
+      font-size: .7rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .stat-value {
+      font-size: 1.375rem;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-value.positive { color: #16a34a; }
+    .stat-value.negative { color: #dc2626; }
+
+    /* Chart containers */
+    .chart-wrapper {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem 1.25rem;
+    }
+    .chart-title {
+      font-size: .8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: .75rem;
+    }
+    #pv-chart { max-height: 320px; }
+
+    .heatmap-wrapper {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem 1.25rem;
+    }
+    .heatmap-title {
+      font-size: .8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: .75rem;
+    }
+    #wts-canvas {
+      display: block;
+      max-width: 100%;
+    }
+
+    /* ── Methodology section ───────────────────────────────────── */
+    .methodology {
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.5rem;
+    }
+    .methodology h2 {
+      font-size: .875rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: .01em;
+      margin-bottom: 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .methodology pre {
+      font-family: var(--mono);
+      font-size: .8rem;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      line-height: 1.7;
+    }
+    .methodology a { color: var(--accent); }
+
+    /* ── Responsive: collapse panel below controls at small widths ─ */
+    @media (max-width: 760px) {
+      .main-layout { flex-direction: column; }
+      .controls-panel {
+        width: 100%;
+        min-width: unset;
+        position: static;
+        max-height: none;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Page header ─────────────────────────────────────────────── -->
+  <header class="page-header">
+    <a href="index.html" class="back-link">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+      hakeemshindy.github.io
+    </a>
+    <h1>Markowitz Engine</h1>
+    <p class="subtitle">Walk-forward portfolio optimizer &middot; Markowitz (1952) &middot; EWMA covariance &middot; James-Stein shrinkage</p>
+  </header>
+
+  <!-- ── Two-column layout ───────────────────────────────────────── -->
+  <div class="main-layout">
+
+    <!-- Controls panel -->
+    <aside class="controls-panel" aria-label="Backtest controls">
+
+      <!-- Asset universe -->
+      <div class="ctrl-group">
+        <label for="asset-search">Asset Universe</label>
+        <input type="text" id="asset-search" placeholder="Search ticker or name…" autocomplete="off" />
+        <select id="asset-list" multiple size="8" aria-label="Select assets"></select>
+        <div class="asset-btn-row">
+          <button class="btn-sm" id="select-all-btn">Select All</button>
+          <button class="btn-sm" id="clear-btn">Clear</button>
+        </div>
+        <p class="hint" id="selection-count">0 assets selected</p>
+      </div>
+
+      <!-- Risk aversion -->
+      <div class="ctrl-group">
+        <label for="gamma-slider">Risk Aversion &gamma;</label>
+        <div class="slider-row">
+          <input type="range" id="gamma-slider" min="1" max="50" value="10" step="1" />
+          <span class="slider-val" id="gamma-val">10</span>
+        </div>
+        <p class="hint">Higher &gamma; &rarr; lower risk, lower return.</p>
+      </div>
+
+      <!-- Max weight -->
+      <div class="ctrl-group">
+        <label for="max-wt-slider">Max Weight per Asset</label>
+        <div class="slider-row">
+          <input type="range" id="max-wt-slider" min="5" max="40" value="20" step="1" />
+          <span class="slider-val" id="max-wt-val">20%</span>
+        </div>
+      </div>
+
+      <!-- Shrinkage -->
+      <div class="ctrl-group">
+        <label for="shrinkage-slider">James-Stein Shrinkage &alpha;</label>
+        <div class="slider-row">
+          <input type="range" id="shrinkage-slider" min="0" max="100" value="80" step="5" />
+          <span class="slider-val" id="shrinkage-val">80%</span>
+        </div>
+        <p class="hint">&alpha;=100% &rarr; equal-weighted &mu;. &alpha;=0% &rarr; raw EWMA.</p>
+      </div>
+
+      <!-- Rebalance frequency -->
+      <div class="ctrl-group">
+        <label for="rebal-freq">Rebalance Frequency</label>
+        <select id="rebal-freq">
+          <option value="monthly" selected>Monthly</option>
+          <option value="quarterly">Quarterly</option>
+        </select>
+      </div>
+
+      <!-- Dates -->
+      <div class="date-row">
+        <div class="ctrl-group">
+          <label for="start-date">Start Date</label>
+          <input type="date" id="start-date" value="2022-01-03" />
+        </div>
+        <div class="ctrl-group">
+          <label for="end-date">End Date</label>
+          <input type="date" id="end-date" />
+        </div>
+      </div>
+
+      <!-- Run button -->
+      <button id="run-btn">Run Backtest &rarr;</button>
+
+      <!-- Status -->
+      <div id="status" aria-live="polite" aria-label="Backtest status">Select assets and click Run Backtest.</div>
+
+    </aside>
+
+    <!-- Results + methodology -->
+    <main class="results-area" role="main">
+
+      <!-- Results (hidden until run) -->
+      <section id="results-section" aria-label="Backtest results">
+
+        <!-- Stat cards -->
+        <div class="stat-row" id="stat-row">
+          <div class="stat-card">
+            <span class="stat-label">Annual Return</span>
+            <span class="stat-value" id="stat-ret">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Sharpe Ratio</span>
+            <span class="stat-value" id="stat-sharpe">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Max Drawdown</span>
+            <span class="stat-value" id="stat-dd">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Ann. Volatility</span>
+            <span class="stat-value" id="stat-vol">—</span>
+          </div>
+        </div>
+
+        <!-- Portfolio value chart -->
+        <div class="chart-wrapper">
+          <p class="chart-title">Portfolio Value (normalized to 1.00)</p>
+          <canvas id="pv-chart" aria-label="Portfolio value chart"></canvas>
+        </div>
+
+        <!-- Weights heatmap -->
+        <div class="heatmap-wrapper">
+          <p class="heatmap-title">Portfolio Weights Over Time (aim portfolio weights)</p>
+          <canvas id="wts-canvas" width="700" height="220" aria-label="Portfolio weights heatmap"></canvas>
+        </div>
+
+      </section>
+
+      <!-- Methodology (always visible) -->
+      <section class="methodology" aria-label="Methodology">
+        <h2>Methodology &amp; Credits</h2>
+        <pre>&#x2500;&#x2500;&#x2500; Methodology &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+Objective:  max (&mu; &#x2212; rf)&#x1D57;w &#x2212; &gamma; &middot; w&#x1D57;&#x03A3;w
+            subject to: &#x03A3;w&#x1D62; = 1,  0 &#x2264; w&#x1D62; &#x2264; max_wt
+
+&mu; (expected returns): EWMA of historical log-returns (hl = 252 trading days),
+  then James-Stein cross-sectional shrinkage toward equal-weighted mean:
+  &mu;_eff = (1 &#x2212; &#x03B1;)&#x00B7;&mu;_EWMA + &#x03B1;&#x00B7;&mu;&#x0305;   where &#x03B1; = shrinkage parameter.
+
+&#x03A3; (covariance): EWMA of outer products of demeaned returns (hl = 21 trading days),
+  annualised &#xD7; 252. Regularised with &#x03B5;&#x00B7;I to ensure positive definiteness.
+
+Optimiser: projected gradient ascent with simplex+box projection
+  (Condat 2016, binary search on dual variable).
+
+Walk-forward: rebalance on first trading day of each month/quarter.
+  Performance and weights evaluated out-of-sample.
+
+Data is fetched via a Cloudflare Worker proxy (API keys are server-side only,
+  never exposed to the browser). Results are cached across all users via
+  Cloudflare KV, and locally in your browser's localStorage.
+Computation runs entirely in your browser.
+
+&#x2500;&#x2500;&#x2500; Credits &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+&#x2022; Markowitz, H.M. (1952). "Portfolio Selection." Journal of Finance.
+&#x2022; James &amp; Stein (1961). "Estimation with Quadratic Loss." Proc. 4th Berkeley Symp.
+&#x2022; cvxportfolio (Boyd et al. 2017) &#x2014; framework used in Python backend.
+  <a href="https://github.com/cvxgrp/cvxportfolio" target="_blank" rel="noopener">https://github.com/cvxgrp/cvxportfolio</a>
+&#x2022; Condat, L. (2016). "Fast Projection onto the Simplex and the l&#x2081; Ball."
+  Mathematical Programming.
+&#x2022; Data: Alpaca Markets API (historical adjusted closes, IEX feed).
+&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</pre>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="js/markowitz.js"></script>
+</body>
+</html>
