@@ -993,18 +993,25 @@ function renderWeightsHeatmap(canvas, wtsHistory, symbols, maxWt) {
   ctx.lineWidth = 0.5;
   ctx.strokeRect(legendX, legendY, legendW, legendH);
 
+  // Tick marks above bar
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 1;
+  [[0, legendX], [0.5, legendX + legendW / 2], [1, legendX + legendW]].forEach(([, x]) => {
+    ctx.beginPath(); ctx.moveTo(x, legendY - 2); ctx.lineTo(x, legendY); ctx.stroke();
+  });
+
+  ctx.font = '8px Inter, system-ui, sans-serif';
   ctx.fillStyle = '#475569';
-  ctx.font = '7px Inter, system-ui, sans-serif';
-  ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Weight:', legendX - 2, legendY + legendH / 2);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('0%', legendX, legendY + legendH + 2);
-  ctx.textAlign = 'center';
-  ctx.fillText(fmtPct(maxWt / 2, 0), legendX + legendW / 2, legendY + legendH + 2);
   ctx.textAlign = 'right';
-  ctx.fillText(fmtPct(maxWt, 0), legendX + legendW, legendY + legendH + 2);
+  ctx.fillText('Weight:', legendX - 4, legendY + legendH / 2);
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillText('0%', legendX, legendY + legendH + 3);
+  ctx.textAlign = 'center';
+  ctx.fillText(fmtPct(maxWt / 2, 0), legendX + legendW / 2, legendY + legendH + 3);
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtPct(maxWt, 0), legendX + legendW, legendY + legendH + 3);
 }
 
 /** Render current allocation as CSS progress bars */
@@ -1099,47 +1106,72 @@ function renderIcChart(icSeries, meanIC) {
 }
 
 /** Predicted vs realized μ scatter */
-function renderMuScatter(scatterPoints, symbols) {
+function renderMuScatter(scatterPoints) {
   const canvas = document.getElementById('mu-scatter');
   if (!canvas) return;
   if (muScatterInstance) { muScatterInstance.destroy(); muScatterInstance = null; }
 
-  const COLORS = ['#2563eb','#dc2626','#16a34a','#d97706','#7c3aed',
-                  '#0891b2','#db2777','#65a30d','#9333ea','#ea580c'];
-  const bySymbol = {};
-  for (const pt of scatterPoints) (bySymbol[pt.sym] = bySymbol[pt.sym] || []).push({ x: pt.x, y: pt.y });
-
-  const lim = scatterPoints.reduce((m, p) => Math.max(m, Math.abs(p.x), Math.abs(p.y)), 0.1) * 1.15;
+  const xVals = scatterPoints.map(p => p.x);
+  const yVals = scatterPoints.map(p => p.y);
+  const xPad  = (Math.max(...xVals) - Math.min(...xVals)) * 0.1 || 0.5;
+  const yPad  = (Math.max(...yVals) - Math.min(...yVals)) * 0.1 || 0.5;
+  const xMin  = Math.min(...xVals) - xPad, xMax = Math.max(...xVals) + xPad;
+  const yMin  = Math.min(...yVals) - yPad, yMax = Math.max(...yVals) + yPad;
 
   muScatterInstance = new Chart(canvas.getContext('2d'), {
     data: {
       datasets: [
-        { type: 'line', label: 'Perfect', data: [{ x: -lim, y: -lim }, { x: lim, y: lim }],
-          borderColor: '#f59e0b', borderDash: [4, 3], borderWidth: 1.2,
-          pointRadius: 0, order: 0 },
-        ...Object.entries(bySymbol).map(([sym, pts], i) => ({
+        {
+          type: 'line',
+          label: 'Perfect forecast',
+          data: [{ x: xMin, y: xMin }, { x: xMax, y: xMax }],
+          borderColor: '#f59e0b',
+          borderDash: [4, 3],
+          borderWidth: 1.2,
+          pointRadius: 0,
+          order: 0,
+        },
+        {
           type: 'scatter',
-          label: sym,
-          data: pts,
-          backgroundColor: COLORS[i % COLORS.length] + '60',
-          pointRadius: 4,
+          label: `${scatterPoints.length} obs (hover for symbol)`,
+          data: scatterPoints.map(p => ({ x: p.x, y: p.y })),
+          backgroundColor: 'rgba(37,99,235,0.18)',
+          borderColor: 'rgba(37,99,235,0.45)',
+          borderWidth: 0.5,
+          pointRadius: 3,
+          pointHoverRadius: 5,
           order: 1,
-        })),
+        },
       ],
     },
     options: {
       responsive: true,
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
-        tooltip: { callbacks: {
-          label: ctx => ` ${ctx.dataset.label}: pred ${ctx.parsed.x.toFixed(2)}, real ${ctx.parsed.y.toFixed(2)}`,
-        }},
+        legend: { position: 'top', labels: { font: { size: 9 }, boxWidth: 12, padding: 8 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.datasetIndex !== 1) return null;
+              const pt = scatterPoints[ctx.dataIndex];
+              if (!pt) return null;
+              return ` ${pt.sym}: pred ${ctx.parsed.x.toFixed(2)}, real ${ctx.parsed.y.toFixed(2)}`;
+            },
+          },
+        },
       },
       scales: {
-        x: { min: -lim, max: lim, ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
-             title: { display: true, text: 'Predicted μ (ann.)', font: { size: 9 } }, grid: { color: '#f1f5f9' } },
-        y: { min: -lim, max: lim, ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
-             title: { display: true, text: 'Realized μ (ann.)', font: { size: 9 } }, grid: { color: '#f1f5f9' } },
+        x: {
+          min: xMin, max: xMax,
+          ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
+          title: { display: true, text: 'Predicted μ (annualised)', font: { size: 9 } },
+          grid: { color: '#f1f5f9' },
+        },
+        y: {
+          min: yMin, max: yMax,
+          ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
+          title: { display: true, text: 'Realized μ (annualised)', font: { size: 9 } },
+          grid: { color: '#f1f5f9' },
+        },
       },
     },
   });
@@ -1372,7 +1404,7 @@ async function runBacktestUI() {
     if (accuracy && accSection) {
       renderAccuracyTable(accuracy.perAsset);
       renderIcChart(accuracy.icSeries, accuracy.meanIC);
-      renderMuScatter(accuracy.scatterPoints, validSymbols);
+      renderMuScatter(accuracy.scatterPoints);
       accSection.style.display = 'flex';
     }
 

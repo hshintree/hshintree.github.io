@@ -465,6 +465,37 @@
     }
     #ic-chart, #mu-scatter { max-height: 240px; }
 
+    /* ── Accuracy key ──────────────────────────────────────────── */
+    .acc-key {
+      display: flex;
+      flex-direction: column;
+      gap: .45rem;
+      margin-bottom: 1rem;
+      padding: .75rem 1rem;
+      background: var(--bg-panel);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    .acc-key-row {
+      display: flex;
+      gap: .75rem;
+      font-size: .78rem;
+      line-height: 1.5;
+    }
+    .acc-key-col {
+      min-width: 72px;
+      font-weight: 700;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+    .acc-key-desc {
+      color: var(--text-muted);
+    }
+    .acc-key-desc em {
+      font-style: italic;
+      color: var(--text);
+    }
+
     /* ── Responsive: collapse panel below controls at small widths ─ */
     @media (max-width: 760px) {
       .main-layout { flex-direction: column; }
@@ -621,7 +652,31 @@
       <!-- Forecast accuracy (shown after run) -->
       <section id="acc-section" aria-label="Forecast accuracy">
         <div class="acc-table-wrap">
-          <p class="chart-title">Forecast Accuracy — per asset (out-of-sample, each rebalance period)</p>
+          <p class="chart-title">Forecast Accuracy — per asset (out-of-sample, one row per rebalance period)</p>
+
+          <div class="acc-key">
+            <div class="acc-key-row">
+              <span class="acc-key-col">Bias (μ)</span>
+              <span class="acc-key-desc">Average of <em>(predicted annualised return − realized annualised return)</em> across all rebalance periods. Negative = the model systematically over-predicted returns. E.g. −14% means the EWMA forecast was 14 percentage points too optimistic per year on average.</span>
+            </div>
+            <div class="acc-key-row">
+              <span class="acc-key-col">MAE (μ)</span>
+              <span class="acc-key-desc">Mean absolute error of the annualised return forecast — the average miss size, ignoring direction. A 170% MAE on TSLA is expected: individual stock short-horizon returns are nearly unpredictable, so a typical error of ±170%/yr is normal. Smaller MAE = more accurate forecasts.</span>
+            </div>
+            <div class="acc-key-row">
+              <span class="acc-key-col">Hit Rate</span>
+              <span class="acc-key-desc">Fraction of rebalance periods where the sign of the predicted return matched the sign of the realized return (i.e. the model correctly called up vs down). 50% = coin flip. Values above 50% indicate modest directional skill.</span>
+            </div>
+            <div class="acc-key-row">
+              <span class="acc-key-col">Pearson r</span>
+              <span class="acc-key-desc">Linear correlation between the predicted and realized annualised returns across all rebalance periods. Ranges −1 to +1. Values near 0 are typical for short-horizon return forecasts. A positive r means higher predicted returns were weakly associated with higher realized returns.</span>
+            </div>
+            <div class="acc-key-row">
+              <span class="acc-key-col">Vol Ratio</span>
+              <span class="acc-key-desc">Average of <em>(predicted annualised volatility ÷ realized annualised volatility)</em>. 1.0× = perfectly calibrated. &gt;1× means the EWMA covariance over-estimates forward risk (conservative). The short 21-day EWMA half-life tends to amplify recent turbulence, systematically inflating vol forecasts.</span>
+            </div>
+          </div>
+
           <table class="acc-table">
             <thead>
               <tr>
@@ -651,38 +706,132 @@
       <!-- Methodology (always visible) -->
       <section class="methodology" aria-label="Methodology">
         <h2>Methodology &amp; Credits</h2>
-        <pre>&#x2500;&#x2500;&#x2500; Methodology &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+        <pre>&#x2500;&#x2500;&#x2500; Optimisation Problem &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
-Objective:  max (&mu; &#x2212; rf)&#x1D57;w &#x2212; &gamma; &middot; w&#x1D57;&#x03A3;w
-            subject to: &#x03A3;w&#x1D62; = 1,  0 &#x2264; w&#x1D62; &#x2264; max_wt
+  max  (&mu;_eff &#x2212; rf)&#x1D57; w  &#x2212;  &gamma; &middot; w&#x1D57; &Sigma; w
+  s.t. &Sigma;w&#x1D62; = 1,   0 &le; w&#x1D62; &le; max_wt
 
-&mu; (expected returns): EWMA of historical log-returns (hl = 252 trading days),
-  then James-Stein cross-sectional shrinkage toward equal-weighted mean:
-  &mu;_eff = (1 &#x2212; &#x03B1;)&#x00B7;&mu;_EWMA + &#x03B1;&#x00B7;&mu;&#x0305;   where &#x03B1; = shrinkage parameter.
+  &gamma; (risk aversion): higher &gamma; tilts the portfolio toward minimum
+  variance, sacrificing expected return to reduce volatility.
 
-&#x03A3; (covariance): EWMA of outer products of demeaned returns (hl = 21 trading days),
-  annualised &#xD7; 252. Regularised with &#x03B5;&#x00B7;I to ensure positive definiteness.
+&#x2500;&#x2500;&#x2500; Expected Returns &mu; &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
-Optimiser: projected gradient ascent with simplex+box projection
-  (Condat 2016, binary search on dual variable).
+  Step 1: EWMA of past log-returns, half-life = 252 trading days.
+          &mu;&#x1D62;_EWMA = exponential average of daily returns, more weight
+          on recent observations, annualised &times; 252.
 
-Walk-forward: rebalance on first trading day of each month/quarter.
-  Performance and weights evaluated out-of-sample.
+  Step 2: James-Stein cross-sectional shrinkage toward the equal-
+          weighted mean:
+            &mu;_eff = (1 &#x2212; &alpha;) &middot; &mu;_EWMA + &alpha; &middot; mean(&mu;_EWMA)
+          &alpha; = shrinkage slider (0% = raw EWMA, 100% = all assets get
+          the same &mu;). High shrinkage reduces sensitivity to noisy
+          return estimates — important when history is short.
 
-Data is fetched via a Cloudflare Worker proxy (API keys are server-side only,
-  never exposed to the browser). Results are cached across all users via
-  Cloudflare KV, and locally in your browser's localStorage.
-Computation runs entirely in your browser.
+&#x2500;&#x2500;&#x2500; Covariance &Sigma; &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
-&#x2500;&#x2500;&#x2500; Credits &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+  EWMA of the outer product of demeaned returns, half-life = 21
+  trading days (captures recent regime shifts quickly). Annualised
+  &times; 252. A small ridge &epsilon;&middot;I is added to ensure positive
+  definiteness.
 
-&#x2022; Markowitz, H.M. (1952). "Portfolio Selection." Journal of Finance.
-&#x2022; James &amp; Stein (1961). "Estimation with Quadratic Loss." Proc. 4th Berkeley Symp.
-&#x2022; cvxportfolio (Boyd et al. 2017) &#x2014; framework used in Python backend.
-  <a href="https://github.com/cvxgrp/cvxportfolio" target="_blank" rel="noopener">https://github.com/cvxgrp/cvxportfolio</a>
-&#x2022; Condat, L. (2016). "Fast Projection onto the Simplex and the l&#x2081; Ball."
-  Mathematical Programming.
-&#x2022; Data: Alpaca Markets API (historical adjusted closes, IEX feed).
+&#x2500;&#x2500;&#x2500; Solver &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+  Projected gradient ascent. Each step: gradient ascent on the
+  Lagrangian, then project onto the simplex &cap; box (Condat 2016 —
+  binary search on the dual variable &theta;, O(N log N)).
+
+&#x2500;&#x2500;&#x2500; Walk-Forward Backtest &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+  On each rebalance date: fit &mu; and &Sigma; on all historical data
+  available up to that date (expanding window), solve for w*, hold
+  until the next rebalance. Performance is always out-of-sample —
+  the optimiser never sees future prices.
+
+  Benchmarks: SPY (buy-and-hold) and 1/N (equal-weight, rebalanced
+  on the same schedule).
+
+&#x2500;&#x2500;&#x2500; Output Panels &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+  Current Allocation — the portfolio weights from the most recent
+    rebalance, i.e. what the model recommends holding today.
+
+  Portfolio Value — cumulative return of the Markowitz portfolio vs
+    SPY and 1/N over the backtest window, normalised to 1.0 at start.
+
+  Weights Heatmap — how allocations shifted at each rebalance. Navy
+    = 0% (no allocation), amber = max-weight cap. Colour scale is
+    linear between the two.
+
+  Forecast Accuracy — at each rebalance the model's &mu; and &sigma;
+    predictions are compared against what actually happened over the
+    next period. See the column key above the table.
+
+  IC Over Time — Spearman rank correlation between the vector of
+    predicted returns and the vector of realized returns across all
+    assets at each rebalance. Positive IC = the ordering was correct
+    (assets the model ranked higher actually did better).
+
+  Predicted vs Realized &mu; — scatter of every (asset, rebalance-date)
+    pair. Points along the diagonal = perfect forecasts. Hover to see
+    which asset and rebalance period each point represents.
+
+&#x2500;&#x2500;&#x2500; Limitations &amp; Interpretation &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+  Return forecasting is hard. IC values and Pearson r near zero
+  confirm that EWMA &mu; has almost no out-of-sample predictive power
+  at monthly horizons. This is expected: short-horizon stock returns
+  are dominated by noise, not the slow-moving signal captured by
+  historical averages.
+
+  What this means in practice:
+  &bull; High shrinkage (&alpha; &rarr; 100%) collapses all predicted returns to
+    the same value, reducing the problem to pure minimum-variance.
+    The weights then reflect only correlations and volatilities —
+    not any view on which stocks will outperform.
+  &bull; Low shrinkage (&alpha; &rarr; 0%) lets raw EWMA returns drive the
+    allocation. Because those estimates are noisy and non-stationary,
+    the portfolio becomes erratic and concentrated in recent winners.
+  &bull; Covariance forecasts are better calibrated than return forecasts
+    (vol ratio ~1.1x here), but the short 21-day EWMA half-life
+    amplifies recent turbulence, making the portfolio more risk-averse
+    than a long-run view would justify — i.e., under-allocating to
+    assets that simply had a volatile patch.
+
+  If you want more robust results, consider: factor-model expected
+  returns (Fama-French, CAPM), Ledoit-Wolf covariance shrinkage,
+  transaction-cost-aware optimisers, or Black-Litterman to blend
+  prior views with equilibrium returns.
+
+  &#x26A0; Disclaimer: This tool is for educational and research
+  purposes only. It illustrates the mechanics of mean-variance
+  optimisation using historical data. It does not constitute
+  financial advice. Past backtest performance does not guarantee
+  future results. Do not use this directly to manage real money
+  without understanding its assumptions and limitations.
+
+&#x2500;&#x2500;&#x2500; Data &amp; Infrastructure &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+  Price data: Alpaca Markets API, adjusted daily closes (IEX feed).
+  API keys are stored server-side in a Cloudflare Worker — they are
+  never sent to or stored in the browser.
+
+  Caching: fetched data is cached in Cloudflare KV (shared across all
+  visitors) and in your browser's localStorage. If you or any other
+  user has already fetched a symbol over the same date range, the
+  data is served from cache instantly with no API call.
+
+  All computation (EWMA, optimisation, backtest, accuracy stats) runs
+  entirely in your browser. No data leaves your machine.
+
+&#x2500;&#x2500;&#x2500; References &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+
+  &#x2022; Markowitz, H.M. (1952). Portfolio Selection. J. Finance 7(1).
+  &#x2022; James, W. &amp; Stein, C. (1961). Estimation with Quadratic Loss.
+    Proc. 4th Berkeley Symposium on Probability &amp; Statistics.
+  &#x2022; Condat, L. (2016). Fast Projection onto the Simplex and the
+    &#x2113;&#x2081; Ball. Mathematical Programming 158(1-2), 575-585.
+  &#x2022; Boyd, S. et al. (2017). Multi-Period Trading via Convex Optimization.
+    <a href="https://github.com/cvxgrp/cvxportfolio" target="_blank" rel="noopener">github.com/cvxgrp/cvxportfolio</a>
 &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</pre>
       </section>
 
