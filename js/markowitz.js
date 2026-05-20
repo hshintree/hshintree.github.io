@@ -296,7 +296,7 @@ function solveMarkowitz(muAnn, sigmaAnn, gamma, maxWt, rfRate = 0.045, maxIter =
 // After deploying the worker (`cd website/worker && wrangler deploy`)
 // replace this with your worker URL, e.g.:
 //   https://markowitz-data.YOUR_SUBDOMAIN.workers.dev
-const WORKER_URL    = 'https://markowitz-data.hshintree.workers.dev';
+const WORKER_URL    = 'https://markowitz-data.theprices.workers.dev';
 const FETCH_TIMEOUT = 25000;
 
 /* ── Browser-side localStorage cache ─────────────────────────── */
