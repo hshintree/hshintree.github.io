@@ -548,15 +548,31 @@ async function runBacktest(params) {
 
   // ── Step 2: Align dates ──────────────────────────────────────
   onProgress('Aligning dates and computing returns…');
-  const validSymbols = symbols.filter(s => Object.keys(priceData[s]).length > 5);
+  let validSymbols = symbols.filter(s => Object.keys(priceData[s]).length > 5);
   if (validSymbols.length < 2) {
     throw new Error('Not enough valid symbols with price data. Try different assets or a wider date range.');
   }
 
-  const alignSymbols = [...validSymbols, 'SPY'];
-  const dates = alignDates(priceData, alignSymbols);
+  // Auto-drop the most-restrictive symbol (latest start date) until we have
+  // at least 60 overlapping trading days across all remaining assets.
+  const droppedSymbols = [];
+  let dates = alignDates(priceData, [...validSymbols, 'SPY']);
+  while (dates.length < 60 && validSymbols.length > 1) {
+    let worstSym = null, latestFirst = '';
+    for (const s of validSymbols) {
+      const first = Object.keys(priceData[s]).sort()[0] ?? '';
+      if (first > latestFirst) { latestFirst = first; worstSym = s; }
+    }
+    if (!worstSym) break;
+    droppedSymbols.push({ sym: worstSym, first: latestFirst });
+    validSymbols = validSymbols.filter(s => s !== worstSym);
+    dates = alignDates(priceData, [...validSymbols, 'SPY']);
+  }
   if (dates.length < 60) {
-    throw new Error('Less than 60 overlapping trading days found. Please widen your date range.');
+    throw new Error(
+      `Only ${dates.length} overlapping trading days found even after removing ` +
+      `short-history assets. Please widen your date range.`
+    );
   }
 
   // Build price matrices: priceMatrix[t][sym_idx]
@@ -676,6 +692,7 @@ async function runBacktest(params) {
     symbols: validSymbols,
     predMuLog,
     realMuLog,
+    droppedSymbols,
   };
 }
 
@@ -1342,7 +1359,19 @@ async function runBacktestUI() {
     });
 
     const { pvPortfolio, pvSpy, pvEW, wtsHistory, dates, symbols: validSymbols,
-            predMuLog, realMuLog } = result;
+            predMuLog, realMuLog, droppedSymbols } = result;
+
+    // Show warning banner if any assets were auto-dropped due to short history
+    const warnEl = document.getElementById('dropped-assets-warning');
+    if (warnEl) {
+      if (droppedSymbols && droppedSymbols.length > 0) {
+        const list = droppedSymbols.map(d => `${d.sym} (data starts ${d.first})`).join(', ');
+        warnEl.textContent = `⚠️ Auto-removed ${droppedSymbols.length} asset(s) with insufficient history for this date range: ${list}`;
+        warnEl.style.display = 'block';
+      } else {
+        warnEl.style.display = 'none';
+      }
+    }
 
     // ── Compute stats ──────────────────────────────────────────
     const statsPort = computeStats(pvPortfolio);
