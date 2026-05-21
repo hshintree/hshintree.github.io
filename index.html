@@ -113,7 +113,7 @@
               Select assets from 115 curated S&amp;P 500 companies, tune risk aversion, shrinkage,
               and rebalance frequency, then run a live backtest with Chart.js visualizations.
             </p>
-            <a href="markowitz.html" class="card-link">Launch &rarr;</a>
+            <a href="markowitz.html" class="card-link" id="markowitz-launch" onclick="return launchMarkowitz(event)">Launch &rarr;</a>
           </div>
         </article>
 
@@ -135,11 +135,42 @@
     </div>
   </section>
 
+  <!-- ── Markowitz Engine (inline, shown on Launch click) ──────── -->
+  <section id="markowitz-engine" style="display:none;" aria-label="Markowitz Engine">
+    <div style="max-width:1400px;margin:0 auto;padding:0 1.5rem 2.5rem;">
+      <iframe
+        id="markowitz-iframe"
+        src=""
+        title="Markowitz Engine"
+        style="width:100%;height:90vh;border:none;border-radius:8px;box-shadow:0 2px 20px rgba(0,0,0,0.10);"
+        loading="lazy"
+      ></iframe>
+    </div>
+  </section>
+
   <!-- ── Footer ──────────────────────────────────────────────────── -->
   <footer>
     &copy; 2025 Hakeem Shindy &middot; Stanford University
   </footer>
 
   <script src="js/main.js"></script>
+  <script>
+    function launchMarkowitz(e) {
+      e.preventDefault();
+      const section = document.getElementById('markowitz-engine');
+      const iframe  = document.getElementById('markowitz-iframe');
+      const link    = document.getElementById('markowitz-launch');
+      if (section.style.display === 'none') {
+        section.style.display = 'block';
+        if (!iframe.src || iframe.src === window.location.href) iframe.src = 'markowitz.html';
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        link.textContent = 'Collapse ↑';
+      } else {
+        section.style.display = 'none';
+        link.textContent = 'Launch →';
+      }
+      return false;
+    }
+  </script>
 </body>
 </html>

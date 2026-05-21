@@ -771,27 +771,42 @@ function computeForecastAccuracy(predMuLog, realMuLog, symbols) {
     return { sym, bias, mae, hitRate, r, volRatio, n };
   });
 
-  // Quintile calibration: at each rebalance date rank assets by predicted μ
-  // into 5 bins, record the realized μ for each bin, average across all dates.
-  const quintileBuckets = [[], [], [], [], []];
+  // Error histogram: collect all (realized - predicted) errors, bin into ~12 buckets
+  const allErrors = [];
   for (let i = 0; i < pred.length; i++) {
     if (i >= real.length || !real[i]) continue;
-    const valid = symbols.map((_, j) => ({ predMu: pred[i].mu[j], realMu: real[i].mu[j] }))
-                         .filter(a => isFinite(a.predMu) && isFinite(a.realMu));
-    if (valid.length < 2) continue;
-    valid.sort((a, b) => a.predMu - b.predMu);
-    const n = valid.length;
-    valid.forEach((a, rank) => {
-      quintileBuckets[Math.min(4, Math.floor(rank / n * 5))].push(a.realMu);
+    symbols.forEach((_, j) => {
+      const p = pred[i].mu[j], r = real[i].mu[j];
+      if (isFinite(p) && isFinite(r)) allErrors.push(r - p);
     });
   }
-  const quintileStats = quintileBuckets.map((bucket, qi) => {
-    if (bucket.length === 0) return { q: qi + 1, mean: NaN, n: 0 };
-    const mean = bucket.reduce((s, v) => s + v, 0) / bucket.length;
-    return { q: qi + 1, mean, n: bucket.length };
-  });
 
-  return { icSeries, perAsset, quintileStats, meanIC };
+  const errorHistData = (() => {
+    if (allErrors.length < 5) return null;
+    const sorted = [...allErrors].sort((a, b) => a - b);
+    const p05 = sorted[Math.floor(sorted.length * 0.05)];
+    const p95 = sorted[Math.floor(sorted.length * 0.95)];
+    const N_BINS = 12;
+    const step = (p95 - p05) / N_BINS;
+    if (step <= 0) return null;
+    const bins = Array.from({ length: N_BINS }, (_, k) => ({
+      lo: p05 + k * step,
+      hi: p05 + (k + 1) * step,
+      count: 0, sumErr: 0,
+    }));
+    for (const e of allErrors) {
+      const idx = Math.min(N_BINS - 1, Math.max(0, Math.floor((e - p05) / step)));
+      bins[idx].count++;
+      bins[idx].sumErr += e;
+    }
+    return bins.map(b => ({
+      label: `${((b.lo + b.hi) / 2 * 100).toFixed(0)}%`,
+      count: b.count,
+      meanErr: b.count > 0 ? b.sumErr / b.count : NaN,
+    }));
+  })();
+
+  return { icSeries, perAsset, errorHistData, meanIC };
 }
 
 /* ================================================================
@@ -1107,51 +1122,56 @@ function renderIcChart(icSeries, meanIC) {
   });
 }
 
-/** Quintile calibration chart: avg realized μ per predicted-return quintile */
-function renderQuintileChart(quintileStats) {
+/** Prediction error histogram: bars = count per bin, line = avg error per bin */
+function renderErrorHistogram(errorHistData) {
   const canvas = document.getElementById('mu-scatter');
   if (!canvas) return;
   if (muScatterInstance) { muScatterInstance.destroy(); muScatterInstance = null; }
-  if (!quintileStats || quintileStats.every(q => !isFinite(q.mean))) return;
+  if (!errorHistData || errorHistData.length === 0) return;
 
-  const labels   = ['Q1\n(Low)', 'Q2', 'Q3', 'Q4', 'Q5\n(High)'];
-  const values   = quintileStats.map(q => isFinite(q.mean) ? +(q.mean * 100).toFixed(3) : null);
-  const counts   = quintileStats.map(q => q.n);
-  const bgColors = [
-    'rgba(219,234,254,0.95)', 'rgba(191,219,254,0.95)', 'rgba(147,197,253,0.95)',
-    'rgba(96,165,250,0.95)',  'rgba(59,130,246,0.95)',
-  ];
-  const bdColors = ['#93c5fd','#60a5fa','#3b82f6','#2563eb','#1d4ed8'];
-
-  const finite = values.filter(v => v !== null);
-  const absMax = Math.max(...finite.map(Math.abs), 1);
-  const pad    = absMax * 0.35;
-  const yMin   = +(Math.min(0, ...finite) - pad).toFixed(1);
-  const yMax   = +(Math.max(0, ...finite) + pad).toFixed(1);
+  const labels = errorHistData.map(b => b.label);
+  const counts = errorHistData.map(b => b.count);
+  const means  = errorHistData.map(b => isFinite(b.meanErr) ? +(b.meanErr * 100).toFixed(2) : null);
+  const absMaxMean = Math.max(...means.filter(v => v !== null).map(Math.abs), 1);
 
   muScatterInstance = new Chart(canvas.getContext('2d'), {
     data: {
       labels,
       datasets: [
         {
+          type: 'bar',
+          label: 'Observations',
+          data: counts,
+          backgroundColor: 'rgba(147,197,253,0.75)',
+          borderColor: '#3b82f6',
+          borderWidth: 1,
+          borderRadius: 3,
+          yAxisID: 'yCount',
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: 'Avg error per bin (%/yr)',
+          data: means,
+          borderColor: '#f59e0b',
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: '#f59e0b',
+          yAxisID: 'yMean',
+          order: 1,
+          tension: 0.3,
+          spanGaps: true,
+        },
+        {
           type: 'line',
           label: '_zero',
-          data: [0, 0, 0, 0, 0],
+          data: errorHistData.map(() => 0),
           borderColor: 'rgba(148,163,184,0.6)',
           borderWidth: 1,
           borderDash: [4, 3],
           pointRadius: 0,
+          yAxisID: 'yMean',
           order: 0,
-        },
-        {
-          type: 'bar',
-          label: 'Avg realized μ per quintile',
-          data: values,
-          backgroundColor: bgColors,
-          borderColor: bdColors,
-          borderWidth: 1.5,
-          borderRadius: 4,
-          order: 1,
         },
       ],
     },
@@ -1168,24 +1188,35 @@ function renderQuintileChart(quintileStats) {
         tooltip: {
           callbacks: {
             label: ctx => {
-              if (ctx.datasetIndex !== 1) return null;
-              const v = ctx.parsed.y, n = counts[ctx.dataIndex];
-              return ` ${v >= 0 ? '+' : ''}${v.toFixed(2)}% avg realized μ  (n = ${n} obs)`;
+              if (ctx.dataset.yAxisID === 'yCount') return ` ${ctx.parsed.y} observations`;
+              if (ctx.datasetIndex === 1 && ctx.parsed.y !== null)
+                return ` Avg error: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(1)}%/yr`;
+              return null;
             },
           },
         },
       },
       scales: {
         x: {
-          ticks: { font: { size: 9 } },
-          title: { display: true, text: 'Predicted return quintile', font: { size: 9 } },
+          ticks: { font: { size: 8 }, maxRotation: 45, autoSkip: false },
           grid: { display: false },
+          title: { display: true, text: 'Realized − Predicted (×100%, annualised)', font: { size: 9 } },
         },
-        y: {
-          min: yMin, max: yMax,
-          ticks: { font: { size: 9 }, callback: v => v.toFixed(0) + '%' },
-          title: { display: true, text: 'Avg realized μ, annualised', font: { size: 9 } },
+        yCount: {
+          type: 'linear',
+          position: 'left',
+          ticks: { font: { size: 9 } },
+          title: { display: true, text: 'Observations', font: { size: 9 } },
           grid: { color: '#f1f5f9' },
+        },
+        yMean: {
+          type: 'linear',
+          position: 'right',
+          min: -(absMaxMean * 1.6),
+          max: absMaxMean * 1.6,
+          ticks: { font: { size: 9 }, callback: v => v.toFixed(0) + '%' },
+          title: { display: true, text: 'Avg error (%/yr)', font: { size: 9 } },
+          grid: { drawOnChartArea: false },
         },
       },
     },
@@ -1208,22 +1239,21 @@ function setStatus(msg, cls = '') {
 /** Update the selection count badge */
 function updateSelectionCount() {
   const list  = document.getElementById('asset-list');
-  const count = list ? Array.from(list.options).filter(o => o.selected).length : 0;
+  const count = list ? list.querySelectorAll('input[type="checkbox"]:checked').length : 0;
   const el    = document.getElementById('selection-count');
   if (el) el.textContent = `${count} asset${count !== 1 ? 's' : ''} selected`;
 }
 
-/** Populate #asset-list from stocksData, filtered by query */
+/** Populate #asset-list from stocksData, filtered by query (custom checkbox list) */
 function populateAssetList(query = '') {
   const list = document.getElementById('asset-list');
   if (!list) return;
 
-  // Remember currently selected tickers
+  // Remember currently checked tickers before clearing
   const selected = new Set(
-    Array.from(list.options).filter(o => o.selected).map(o => o.value)
+    Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value)
   );
 
-  // Clear
   list.innerHTML = '';
 
   const q = query.toLowerCase().trim();
@@ -1235,23 +1265,31 @@ function populateAssetList(query = '') {
       )
     : stocksData;
 
-  // Group by sector for readability
   const bySector = {};
   for (const s of filtered) {
     (bySector[s.sector] = bySector[s.sector] || []).push(s);
   }
 
   for (const sector of Object.keys(bySector).sort()) {
-    const group = document.createElement('optgroup');
-    group.label = sector;
+    const hdr = document.createElement('div');
+    hdr.className = 'asset-sector-label';
+    hdr.textContent = sector;
+    list.appendChild(hdr);
+
     for (const s of bySector[sector]) {
-      const opt = document.createElement('option');
-      opt.value = s.ticker;
-      opt.textContent = `${s.ticker} — ${s.name}`;
-      opt.selected = selected.has(s.ticker);
-      group.appendChild(opt);
+      const lbl = document.createElement('label');
+      lbl.className = 'asset-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = s.ticker;
+      cb.checked = selected.has(s.ticker);
+      cb.addEventListener('change', updateSelectionCount);
+      const span = document.createElement('span');
+      span.textContent = `${s.ticker} — ${s.name}`;
+      lbl.appendChild(cb);
+      lbl.appendChild(span);
+      list.appendChild(lbl);
     }
-    list.appendChild(group);
   }
 
   updateSelectionCount();
@@ -1281,18 +1319,15 @@ async function initUI() {
   // ── Select All / Clear ───────────────────────────────────────
   document.getElementById('select-all-btn')?.addEventListener('click', () => {
     const list = document.getElementById('asset-list');
-    Array.from(list.options).forEach(o => { o.selected = true; });
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
     updateSelectionCount();
   });
 
   document.getElementById('clear-btn')?.addEventListener('click', () => {
     const list = document.getElementById('asset-list');
-    Array.from(list.options).forEach(o => { o.selected = false; });
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
     updateSelectionCount();
   });
-
-  document.getElementById('asset-list')
-    ?.addEventListener('change', updateSelectionCount);
 
   // ── Slider live values ───────────────────────────────────────
   const gammaSlider    = document.getElementById('gamma-slider');
@@ -1316,12 +1351,10 @@ async function initUI() {
   document.getElementById('run-btn')?.addEventListener('click', runBacktestUI);
 }
 
-/** Collect selected symbols from the multi-select */
+/** Collect selected symbols from the custom checkbox list */
 function getSelectedSymbols() {
   const list = document.getElementById('asset-list');
-  return Array.from(list.options)
-    .filter(o => o.selected)
-    .map(o => o.value);
+  return Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
 }
 
 /** Update a stat card */
@@ -1431,7 +1464,7 @@ async function runBacktestUI() {
     if (accuracy && accSection) {
       renderAccuracyTable(accuracy.perAsset);
       renderIcChart(accuracy.icSeries, accuracy.meanIC);
-      renderQuintileChart(accuracy.quintileStats);
+      renderErrorHistogram(accuracy.errorHistData);
       accSection.style.display = 'flex';
     }
 

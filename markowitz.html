@@ -127,24 +127,40 @@
     }
     #asset-search:focus { border-color: var(--accent); }
 
-    #asset-list {
+    .asset-custom-list {
       width: 100%;
       height: 160px;
+      overflow-y: auto;
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      font-size: .8125rem;
-      font-family: inherit;
       background: #fff;
+      font-size: .8125rem;
+      -webkit-overflow-scrolling: touch;
+    }
+    .asset-sector-label {
+      font-size: .68rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding: .4rem .65rem .2rem;
+      background: var(--bg-alt);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .asset-item {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .28rem .65rem;
+      cursor: pointer;
+      user-select: none;
       color: var(--text);
-      outline: none;
-      padding: .25rem 0;
     }
-    #asset-list:focus { border-color: var(--accent); }
-    #asset-list option { padding: .25rem .65rem; }
-    #asset-list option:checked {
-      background: var(--accent-light);
-      color: var(--accent-dark);
-    }
+    .asset-item:hover { background: var(--accent-light); }
+    .asset-item input[type="checkbox"] { flex-shrink: 0; accent-color: var(--accent); }
+    .asset-item:has(input:checked) { background: var(--accent-light); color: var(--accent-dark); }
 
     .asset-btn-row {
       display: flex;
@@ -556,7 +572,7 @@
       <div class="ctrl-group">
         <label for="asset-search">Asset Universe</label>
         <input type="text" id="asset-search" placeholder="Search ticker or name…" autocomplete="off" />
-        <select id="asset-list" multiple size="8" aria-label="Select assets"></select>
+        <div id="asset-list" class="asset-custom-list" role="listbox" aria-multiselectable="true" aria-label="Select assets"></div>
         <div class="asset-btn-row">
           <button class="btn-sm" id="select-all-btn">Select All</button>
           <button class="btn-sm" id="clear-btn">Clear</button>
@@ -733,8 +749,8 @@
             <canvas id="ic-chart" aria-label="IC over time"></canvas>
           </div>
           <div class="acc-chart-wrap">
-            <p class="chart-title">Forecast Quintile Analysis (Q1 = lowest predicted return)</p>
-            <canvas id="mu-scatter" aria-label="Forecast quintile calibration chart"></canvas>
+            <p class="chart-title">Prediction Error Distribution (Realized &minus; Predicted &mu;)</p>
+            <canvas id="mu-scatter" aria-label="Prediction error distribution histogram"></canvas>
           </div>
         </div>
       </section>
@@ -807,13 +823,14 @@
     assets at each rebalance. Positive IC = the ordering was correct
     (assets the model ranked higher actually did better).
 
-  Forecast Quintile Analysis: at each rebalance date assets are ranked
-    by predicted &mu; and sorted into five bins (Q1 = lowest 20%
-    predicted, Q5 = highest 20% predicted). The bar shows the average
-    realized annualised return for assets in each bin, averaged across
-    all rebalance periods. If the model has directional skill the bars
-    should rise from Q1 to Q5. Hover a bar for the exact value and
-    observation count.
+  Prediction Error Distribution: pools all (realized &minus; predicted)
+    annualised return errors across every asset and every rebalance
+    period. Errors are divided into 12 equal-width buckets spanning the
+    5th to 95th percentile of errors. Blue bars (left axis) show how
+    many observations fall in each bucket. The amber line (right axis)
+    shows the average error within each bucket. A distribution centred
+    near zero with a symmetric amber line indicates unbiased forecasts;
+    a systematic shift left or right reveals over/under-prediction.
 
 &#x2500;&#x2500;&#x2500; Limitations &amp; Interpretation &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
