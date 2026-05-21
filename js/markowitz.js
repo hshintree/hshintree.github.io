@@ -978,40 +978,11 @@ function renderWeightsHeatmap(canvas, wtsHistory, symbols, maxWt) {
     ctx.fillText(d, x, topPad + drawH + 3);
   }
 
-  // Legend bar: navy → white → amber
-  const legendX = labelW;
-  const legendY = topPad + drawH + 13;
-  const legendW = Math.min(160, drawW);
-  const legendH = 5;
-  const grad = ctx.createLinearGradient(legendX, 0, legendX + legendW, 0);
-  grad.addColorStop(0,   '#1e3a8a');
-  grad.addColorStop(0.5, '#ffffff');
-  grad.addColorStop(1,   '#f59e0b');
-  ctx.fillStyle = grad;
-  ctx.fillRect(legendX, legendY, legendW, legendH);
-  ctx.strokeStyle = '#e2e8f0';
-  ctx.lineWidth = 0.5;
-  ctx.strokeRect(legendX, legendY, legendW, legendH);
-
-  // Tick marks above bar
-  ctx.strokeStyle = '#94a3b8';
-  ctx.lineWidth = 1;
-  [[0, legendX], [0.5, legendX + legendW / 2], [1, legendX + legendW]].forEach(([, x]) => {
-    ctx.beginPath(); ctx.moveTo(x, legendY - 2); ctx.lineTo(x, legendY); ctx.stroke();
-  });
-
-  ctx.font = '8px Inter, system-ui, sans-serif';
-  ctx.fillStyle = '#475569';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'right';
-  ctx.fillText('Weight:', legendX - 4, legendY + legendH / 2);
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'left';
-  ctx.fillText('0%', legendX, legendY + legendH + 3);
-  ctx.textAlign = 'center';
-  ctx.fillText(fmtPct(maxWt / 2, 0), legendX + legendW / 2, legendY + legendH + 3);
-  ctx.textAlign = 'right';
-  ctx.fillText(fmtPct(maxWt, 0), legendX + legendW, legendY + legendH + 3);
+  // Update HTML legend labels below canvas
+  const midEl = document.getElementById('hl-mid');
+  const hiEl  = document.getElementById('hl-hi');
+  if (midEl) midEl.textContent = fmtPct(maxWt / 2, 0);
+  if (hiEl)  hiEl.textContent  = fmtPct(maxWt, 0);
 }
 
 /** Render current allocation as CSS progress bars */
@@ -1111,8 +1082,9 @@ function renderMuScatter(scatterPoints) {
   if (!canvas) return;
   if (muScatterInstance) { muScatterInstance.destroy(); muScatterInstance = null; }
 
-  const xVals = scatterPoints.map(p => p.x);
-  const yVals = scatterPoints.map(p => p.y);
+  // x = realized μ (wide spread), y = predicted μ (narrow due to shrinkage)
+  const xVals = scatterPoints.map(p => p.y);
+  const yVals = scatterPoints.map(p => p.x);
   const xPad  = (Math.max(...xVals) - Math.min(...xVals)) * 0.1 || 0.5;
   const yPad  = (Math.max(...yVals) - Math.min(...yVals)) * 0.1 || 0.5;
   const xMin  = Math.min(...xVals) - xPad, xMax = Math.max(...xVals) + xPad;
@@ -1134,7 +1106,7 @@ function renderMuScatter(scatterPoints) {
         {
           type: 'scatter',
           label: `${scatterPoints.length} obs (hover for symbol)`,
-          data: scatterPoints.map(p => ({ x: p.x, y: p.y })),
+          data: scatterPoints.map(p => ({ x: p.y, y: p.x })),
           backgroundColor: 'rgba(37,99,235,0.18)',
           borderColor: 'rgba(37,99,235,0.45)',
           borderWidth: 0.5,
@@ -1154,7 +1126,7 @@ function renderMuScatter(scatterPoints) {
               if (ctx.datasetIndex !== 1) return null;
               const pt = scatterPoints[ctx.dataIndex];
               if (!pt) return null;
-              return ` ${pt.sym}: pred ${ctx.parsed.x.toFixed(2)}, real ${ctx.parsed.y.toFixed(2)}`;
+              return ` ${pt.sym}: real ${ctx.parsed.x.toFixed(2)}, pred ${ctx.parsed.y.toFixed(2)}`;
             },
           },
         },
@@ -1163,13 +1135,13 @@ function renderMuScatter(scatterPoints) {
         x: {
           min: xMin, max: xMax,
           ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
-          title: { display: true, text: 'Predicted μ (annualised)', font: { size: 9 } },
+          title: { display: true, text: 'Realized μ (annualised)', font: { size: 9 } },
           grid: { color: '#f1f5f9' },
         },
         y: {
           min: yMin, max: yMax,
-          ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
-          title: { display: true, text: 'Realized μ (annualised)', font: { size: 9 } },
+          ticks: { font: { size: 9 }, callback: v => v.toFixed(2) },
+          title: { display: true, text: 'Predicted μ (annualised)', font: { size: 9 } },
           grid: { color: '#f1f5f9' },
         },
       },

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Markowitz Engine — Hakeem Shindy</title>
+  <title>Markowitz Engine | Hakeem Shindy</title>
   <meta name="description" content="Interactive walk-forward Markowitz portfolio optimizer. Tune gamma, shrinkage, rebalance frequency, and asset universe." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -331,6 +331,28 @@
       display: block;
       max-width: 100%;
     }
+    .heatmap-legend-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      margin-top: 6px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    .hl-label { white-space: nowrap; padding-top: 1px; }
+    .heatmap-legend-wrap { display: flex; flex-direction: column; gap: 2px; }
+    .heatmap-legend-bar {
+      width: 160px;
+      height: 8px;
+      background: linear-gradient(to right, #1e3a8a, #ffffff, #f59e0b);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+    }
+    .heatmap-legend-ticks {
+      display: flex;
+      justify-content: space-between;
+      width: 160px;
+    }
 
     /* ── Methodology section ───────────────────────────────────── */
     .methodology {
@@ -645,6 +667,17 @@
         <div class="heatmap-wrapper">
           <p class="heatmap-title">Portfolio Weights Over Time (aim portfolio weights)</p>
           <canvas id="wts-canvas" width="700" height="220" aria-label="Portfolio weights heatmap"></canvas>
+          <div class="heatmap-legend-row">
+            <span class="hl-label">Weight:</span>
+            <div class="heatmap-legend-wrap">
+              <div class="heatmap-legend-bar"></div>
+              <div class="heatmap-legend-ticks">
+                <span>0%</span>
+                <span id="hl-mid">25%</span>
+                <span id="hl-hi">50%</span>
+              </div>
+            </div>
+          </div>
         </div>
 
       </section>
@@ -652,7 +685,7 @@
       <!-- Forecast accuracy (shown after run) -->
       <section id="acc-section" aria-label="Forecast accuracy">
         <div class="acc-table-wrap">
-          <p class="chart-title">Forecast Accuracy — per asset (out-of-sample, one row per rebalance period)</p>
+          <p class="chart-title">Forecast Accuracy: per asset (out-of-sample, one row per rebalance period)</p>
 
           <div class="acc-key">
             <div class="acc-key-row">
@@ -661,7 +694,7 @@
             </div>
             <div class="acc-key-row">
               <span class="acc-key-col">MAE (μ)</span>
-              <span class="acc-key-desc">Mean absolute error of the annualised return forecast — the average miss size, ignoring direction. A 170% MAE on TSLA is expected: individual stock short-horizon returns are nearly unpredictable, so a typical error of ±170%/yr is normal. Smaller MAE = more accurate forecasts.</span>
+              <span class="acc-key-desc">Mean absolute error of the annualised return forecast: the average miss size, ignoring direction. Smaller MAE = more accurate forecasts.</span>
             </div>
             <div class="acc-key-row">
               <span class="acc-key-col">Hit Rate</span>
@@ -697,7 +730,7 @@
             <canvas id="ic-chart" aria-label="IC over time"></canvas>
           </div>
           <div class="acc-chart-wrap">
-            <p class="chart-title">Predicted vs Realized μ (annualised)</p>
+            <p class="chart-title">Realized vs Predicted μ (annualised, x = realized)</p>
             <canvas id="mu-scatter" aria-label="Predicted vs realized mu scatter"></canvas>
           </div>
         </div>
@@ -725,7 +758,7 @@
             &mu;_eff = (1 &#x2212; &alpha;) &middot; &mu;_EWMA + &alpha; &middot; mean(&mu;_EWMA)
           &alpha; = shrinkage slider (0% = raw EWMA, 100% = all assets get
           the same &mu;). High shrinkage reduces sensitivity to noisy
-          return estimates — important when history is short.
+          return estimates, important when history is short.
 
 &#x2500;&#x2500;&#x2500; Covariance &Sigma; &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
@@ -737,14 +770,14 @@
 &#x2500;&#x2500;&#x2500; Solver &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
   Projected gradient ascent. Each step: gradient ascent on the
-  Lagrangian, then project onto the simplex &cap; box (Condat 2016 —
+  Lagrangian, then project onto the simplex &cap; box (Condat 2016,
   binary search on the dual variable &theta;, O(N log N)).
 
 &#x2500;&#x2500;&#x2500; Walk-Forward Backtest &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
   On each rebalance date: fit &mu; and &Sigma; on all historical data
   available up to that date (expanding window), solve for w*, hold
-  until the next rebalance. Performance is always out-of-sample —
+  until the next rebalance. Performance is always out-of-sample;
   the optimiser never sees future prices.
 
   Benchmarks: SPY (buy-and-hold) and 1/N (equal-weight, rebalanced
@@ -752,26 +785,26 @@
 
 &#x2500;&#x2500;&#x2500; Output Panels &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
-  Current Allocation — the portfolio weights from the most recent
+  Current Allocation: the portfolio weights from the most recent
     rebalance, i.e. what the model recommends holding today.
 
-  Portfolio Value — cumulative return of the Markowitz portfolio vs
+  Portfolio Value: cumulative return of the Markowitz portfolio vs
     SPY and 1/N over the backtest window, normalised to 1.0 at start.
 
-  Weights Heatmap — how allocations shifted at each rebalance. Navy
+  Weights Heatmap: how allocations shifted at each rebalance. Navy
     = 0% (no allocation), amber = max-weight cap. Colour scale is
     linear between the two.
 
-  Forecast Accuracy — at each rebalance the model's &mu; and &sigma;
+  Forecast Accuracy: at each rebalance the model's &mu; and &sigma;
     predictions are compared against what actually happened over the
     next period. See the column key above the table.
 
-  IC Over Time — Spearman rank correlation between the vector of
+  IC Over Time: Spearman rank correlation between the vector of
     predicted returns and the vector of realized returns across all
     assets at each rebalance. Positive IC = the ordering was correct
     (assets the model ranked higher actually did better).
 
-  Predicted vs Realized &mu; — scatter of every (asset, rebalance-date)
+  Realized vs Predicted &mu;: scatter of every (asset, rebalance-date)
     pair. Points along the diagonal = perfect forecasts. Hover to see
     which asset and rebalance period each point represents.
 
@@ -786,7 +819,7 @@
   What this means in practice:
   &bull; High shrinkage (&alpha; &rarr; 100%) collapses all predicted returns to
     the same value, reducing the problem to pure minimum-variance.
-    The weights then reflect only correlations and volatilities —
+    The weights then reflect only correlations and volatilities,
     not any view on which stocks will outperform.
   &bull; Low shrinkage (&alpha; &rarr; 0%) lets raw EWMA returns drive the
     allocation. Because those estimates are noisy and non-stationary,
@@ -794,7 +827,7 @@
   &bull; Covariance forecasts are better calibrated than return forecasts
     (vol ratio ~1.1x here), but the short 21-day EWMA half-life
     amplifies recent turbulence, making the portfolio more risk-averse
-    than a long-run view would justify — i.e., under-allocating to
+    than a long-run view would justify, i.e., under-allocating to
     assets that simply had a volatile patch.
 
   If you want more robust results, consider: factor-model expected
@@ -812,7 +845,7 @@
 &#x2500;&#x2500;&#x2500; Data &amp; Infrastructure &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
   Price data: Alpaca Markets API, adjusted daily closes (IEX feed).
-  API keys are stored server-side in a Cloudflare Worker — they are
+  API keys are stored server-side in a Cloudflare Worker; they are
   never sent to or stored in the browser.
 
   Caching: fetched data is cached in Cloudflare KV (shared across all
