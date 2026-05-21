@@ -110,8 +110,10 @@
             <h3>Markowitz Engine</h3>
             <p>
               An interactive walk-forward portfolio optimizer running entirely in the browser.
-              Select assets from 115 curated S&amp;P 500 companies, tune risk aversion, shrinkage,
-              and rebalance frequency, then run a live backtest with Chart.js visualizations.
+              Choose from 242 equities and ETFs across 17 sectors including bonds, gold, and
+              commodities. Tune risk aversion, James-Stein shrinkage, and rebalance frequency,
+              then run a full backtest with performance charts, weights heatmap, and forecast
+              accuracy diagnostics.
             </p>
             <a href="markowitz.html" class="card-link" id="markowitz-launch" onclick="return launchMarkowitz(event)">Launch &rarr;</a>
           </div>
@@ -157,6 +159,11 @@
   <script>
     function launchMarkowitz(e) {
       e.preventDefault();
+      // On mobile, iframes are cramped — navigate directly instead
+      if (window.innerWidth < 768) {
+        window.location.href = 'markowitz.html';
+        return false;
+      }
       const section = document.getElementById('markowitz-engine');
       const iframe  = document.getElementById('markowitz-iframe');
       const link    = document.getElementById('markowitz-launch');

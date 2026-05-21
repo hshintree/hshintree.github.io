@@ -800,7 +800,7 @@ function computeForecastAccuracy(predMuLog, realMuLog, symbols) {
       bins[idx].sumErr += e;
     }
     return bins.map(b => ({
-      label: `${((b.lo + b.hi) / 2 * 100).toFixed(0)}%`,
+      label: `${b.lo.toFixed(2)} to ${b.hi.toFixed(2)}`,
       count: b.count,
       meanErr: b.count > 0 ? b.sumErr / b.count : NaN,
     }));
@@ -1131,8 +1131,8 @@ function renderErrorHistogram(errorHistData) {
 
   const labels = errorHistData.map(b => b.label);
   const counts = errorHistData.map(b => b.count);
-  const means  = errorHistData.map(b => isFinite(b.meanErr) ? +(b.meanErr * 100).toFixed(2) : null);
-  const absMaxMean = Math.max(...means.filter(v => v !== null).map(Math.abs), 1);
+  const means  = errorHistData.map(b => isFinite(b.meanErr) ? +b.meanErr.toFixed(4) : null);
+  const absMaxMean = Math.max(...means.filter(v => v !== null).map(Math.abs), 0.01);
 
   muScatterInstance = new Chart(canvas.getContext('2d'), {
     data: {
@@ -1190,7 +1190,7 @@ function renderErrorHistogram(errorHistData) {
             label: ctx => {
               if (ctx.dataset.yAxisID === 'yCount') return ` ${ctx.parsed.y} observations`;
               if (ctx.datasetIndex === 1 && ctx.parsed.y !== null)
-                return ` Avg error: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(1)}%/yr`;
+                return ` Avg error: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(3)}`;
               return null;
             },
           },
@@ -1200,7 +1200,7 @@ function renderErrorHistogram(errorHistData) {
         x: {
           ticks: { font: { size: 8 }, maxRotation: 45, autoSkip: false },
           grid: { display: false },
-          title: { display: true, text: 'Realized − Predicted (×100%, annualised)', font: { size: 9 } },
+          title: { display: true, text: 'Realized − Predicted (decimal)', font: { size: 9 } },
         },
         yCount: {
           type: 'linear',
@@ -1214,8 +1214,8 @@ function renderErrorHistogram(errorHistData) {
           position: 'right',
           min: -(absMaxMean * 1.6),
           max: absMaxMean * 1.6,
-          ticks: { font: { size: 9 }, callback: v => v.toFixed(0) + '%' },
-          title: { display: true, text: 'Avg error (%/yr)', font: { size: 9 } },
+          ticks: { font: { size: 9 }, callback: v => v.toFixed(2) },
+          title: { display: true, text: 'Avg error', font: { size: 9 } },
           grid: { drawOnChartArea: false },
         },
       },
@@ -1227,7 +1227,8 @@ function renderErrorHistogram(errorHistData) {
    10. UI wiring
    ================================================================ */
 
-let stocksData = []; // loaded from stocks.json
+let stocksData = [];      // loaded from stocks.json
+let selectedTickers = new Set(); // persists across search queries
 
 /** Set status text with optional class */
 function setStatus(msg, cls = '') {
@@ -1238,21 +1239,16 @@ function setStatus(msg, cls = '') {
 
 /** Update the selection count badge */
 function updateSelectionCount() {
-  const list  = document.getElementById('asset-list');
-  const count = list ? list.querySelectorAll('input[type="checkbox"]:checked').length : 0;
-  const el    = document.getElementById('selection-count');
-  if (el) el.textContent = `${count} asset${count !== 1 ? 's' : ''} selected`;
+  const el = document.getElementById('selection-count');
+  if (el) el.textContent = `${selectedTickers.size} asset${selectedTickers.size !== 1 ? 's' : ''} selected`;
 }
 
-/** Populate #asset-list from stocksData, filtered by query (custom checkbox list) */
+/** Populate #asset-list from stocksData, filtered by query (custom checkbox list).
+ *  Selection state lives in `selectedTickers`, not the DOM, so searching never
+ *  clears previously selected assets that are temporarily hidden. */
 function populateAssetList(query = '') {
   const list = document.getElementById('asset-list');
   if (!list) return;
-
-  // Remember currently checked tickers before clearing
-  const selected = new Set(
-    Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value)
-  );
 
   list.innerHTML = '';
 
@@ -1282,8 +1278,12 @@ function populateAssetList(query = '') {
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.value = s.ticker;
-      cb.checked = selected.has(s.ticker);
-      cb.addEventListener('change', updateSelectionCount);
+      cb.checked = selectedTickers.has(s.ticker);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedTickers.add(s.ticker);
+        else selectedTickers.delete(s.ticker);
+        updateSelectionCount();
+      });
       const span = document.createElement('span');
       span.textContent = `${s.ticker} — ${s.name}`;
       lbl.appendChild(cb);
@@ -1318,12 +1318,18 @@ async function initUI() {
 
   // ── Select All / Clear ───────────────────────────────────────
   document.getElementById('select-all-btn')?.addEventListener('click', () => {
+    // Add all currently visible items to the persistent Set
     const list = document.getElementById('asset-list');
-    list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.checked = true;
+      selectedTickers.add(cb.value);
+    });
     updateSelectionCount();
   });
 
   document.getElementById('clear-btn')?.addEventListener('click', () => {
+    // Clear everything — visible and hidden
+    selectedTickers.clear();
     const list = document.getElementById('asset-list');
     list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
     updateSelectionCount();
@@ -1351,10 +1357,9 @@ async function initUI() {
   document.getElementById('run-btn')?.addEventListener('click', runBacktestUI);
 }
 
-/** Collect selected symbols from the custom checkbox list */
+/** Collect selected symbols from the persistent Set */
 function getSelectedSymbols() {
-  const list = document.getElementById('asset-list');
-  return Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+  return [...selectedTickers];
 }
 
 /** Update a stat card */
