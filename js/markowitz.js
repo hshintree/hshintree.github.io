@@ -771,13 +771,27 @@ function computeForecastAccuracy(predMuLog, realMuLog, symbols) {
     return { sym, bias, mae, hitRate, r, volRatio, n };
   });
 
-  // All (pred, real) scatter points for μ plot
-  const scatterPoints = symbols.flatMap((sym, j) =>
-    pred.map((p, i) => ({ x: p.mu[j], y: real[i].mu[j], sym }))
-        .filter(pt => isFinite(pt.x) && isFinite(pt.y))
-  );
+  // Quintile calibration: at each rebalance date rank assets by predicted μ
+  // into 5 bins, record the realized μ for each bin, average across all dates.
+  const quintileBuckets = [[], [], [], [], []];
+  for (let i = 0; i < pred.length; i++) {
+    if (i >= real.length || !real[i]) continue;
+    const valid = symbols.map((_, j) => ({ predMu: pred[i].mu[j], realMu: real[i].mu[j] }))
+                         .filter(a => isFinite(a.predMu) && isFinite(a.realMu));
+    if (valid.length < 2) continue;
+    valid.sort((a, b) => a.predMu - b.predMu);
+    const n = valid.length;
+    valid.forEach((a, rank) => {
+      quintileBuckets[Math.min(4, Math.floor(rank / n * 5))].push(a.realMu);
+    });
+  }
+  const quintileStats = quintileBuckets.map((bucket, qi) => {
+    if (bucket.length === 0) return { q: qi + 1, mean: NaN, n: 0 };
+    const mean = bucket.reduce((s, v) => s + v, 0) / bucket.length;
+    return { q: qi + 1, mean, n: bucket.length };
+  });
 
-  return { icSeries, perAsset, scatterPoints, meanIC };
+  return { icSeries, perAsset, quintileStats, meanIC };
 }
 
 /* ================================================================
@@ -1093,42 +1107,50 @@ function renderIcChart(icSeries, meanIC) {
   });
 }
 
-/** Predicted vs realized μ scatter */
-function renderMuScatter(scatterPoints) {
+/** Quintile calibration chart: avg realized μ per predicted-return quintile */
+function renderQuintileChart(quintileStats) {
   const canvas = document.getElementById('mu-scatter');
   if (!canvas) return;
   if (muScatterInstance) { muScatterInstance.destroy(); muScatterInstance = null; }
+  if (!quintileStats || quintileStats.every(q => !isFinite(q.mean))) return;
 
-  // x = realized μ (wide spread), y = predicted μ (narrow due to shrinkage)
-  const xVals = scatterPoints.map(p => p.y);
-  const yVals = scatterPoints.map(p => p.x);
-  const xPad  = (Math.max(...xVals) - Math.min(...xVals)) * 0.1 || 0.5;
-  const yPad  = (Math.max(...yVals) - Math.min(...yVals)) * 0.1 || 0.5;
-  const xMin  = Math.min(...xVals) - xPad, xMax = Math.max(...xVals) + xPad;
-  const yMin  = Math.min(...yVals) - yPad, yMax = Math.max(...yVals) + yPad;
+  const labels   = ['Q1\n(Low)', 'Q2', 'Q3', 'Q4', 'Q5\n(High)'];
+  const values   = quintileStats.map(q => isFinite(q.mean) ? +(q.mean * 100).toFixed(3) : null);
+  const counts   = quintileStats.map(q => q.n);
+  const bgColors = [
+    'rgba(219,234,254,0.95)', 'rgba(191,219,254,0.95)', 'rgba(147,197,253,0.95)',
+    'rgba(96,165,250,0.95)',  'rgba(59,130,246,0.95)',
+  ];
+  const bdColors = ['#93c5fd','#60a5fa','#3b82f6','#2563eb','#1d4ed8'];
+
+  const finite = values.filter(v => v !== null);
+  const absMax = Math.max(...finite.map(Math.abs), 1);
+  const pad    = absMax * 0.35;
+  const yMin   = +(Math.min(0, ...finite) - pad).toFixed(1);
+  const yMax   = +(Math.max(0, ...finite) + pad).toFixed(1);
 
   muScatterInstance = new Chart(canvas.getContext('2d'), {
     data: {
+      labels,
       datasets: [
         {
           type: 'line',
-          label: 'Perfect forecast',
-          data: [{ x: xMin, y: xMin }, { x: xMax, y: xMax }],
-          borderColor: '#f59e0b',
+          label: '_zero',
+          data: [0, 0, 0, 0, 0],
+          borderColor: 'rgba(148,163,184,0.6)',
+          borderWidth: 1,
           borderDash: [4, 3],
-          borderWidth: 1.2,
           pointRadius: 0,
           order: 0,
         },
         {
-          type: 'scatter',
-          label: `${scatterPoints.length} obs (hover for symbol)`,
-          data: scatterPoints.map(p => ({ x: p.y, y: p.x })),
-          backgroundColor: 'rgba(37,99,235,0.18)',
-          borderColor: 'rgba(37,99,235,0.45)',
-          borderWidth: 0.5,
-          pointRadius: 3,
-          pointHoverRadius: 5,
+          type: 'bar',
+          label: 'Avg realized μ per quintile',
+          data: values,
+          backgroundColor: bgColors,
+          borderColor: bdColors,
+          borderWidth: 1.5,
+          borderRadius: 4,
           order: 1,
         },
       ],
@@ -1136,29 +1158,33 @@ function renderMuScatter(scatterPoints) {
     options: {
       responsive: true,
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 9 }, boxWidth: 12, padding: 8 } },
+        legend: {
+          position: 'top',
+          labels: {
+            font: { size: 9 }, boxWidth: 12, padding: 8,
+            filter: item => item.text !== '_zero',
+          },
+        },
         tooltip: {
           callbacks: {
             label: ctx => {
               if (ctx.datasetIndex !== 1) return null;
-              const pt = scatterPoints[ctx.dataIndex];
-              if (!pt) return null;
-              return ` ${pt.sym}: real ${ctx.parsed.x.toFixed(2)}, pred ${ctx.parsed.y.toFixed(2)}`;
+              const v = ctx.parsed.y, n = counts[ctx.dataIndex];
+              return ` ${v >= 0 ? '+' : ''}${v.toFixed(2)}% avg realized μ  (n = ${n} obs)`;
             },
           },
         },
       },
       scales: {
         x: {
-          min: xMin, max: xMax,
-          ticks: { font: { size: 9 }, callback: v => v.toFixed(1) },
-          title: { display: true, text: 'Realized μ (annualised)', font: { size: 9 } },
-          grid: { color: '#f1f5f9' },
+          ticks: { font: { size: 9 } },
+          title: { display: true, text: 'Predicted return quintile', font: { size: 9 } },
+          grid: { display: false },
         },
         y: {
           min: yMin, max: yMax,
-          ticks: { font: { size: 9 }, callback: v => v.toFixed(2) },
-          title: { display: true, text: 'Predicted μ (annualised)', font: { size: 9 } },
+          ticks: { font: { size: 9 }, callback: v => v.toFixed(0) + '%' },
+          title: { display: true, text: 'Avg realized μ, annualised', font: { size: 9 } },
           grid: { color: '#f1f5f9' },
         },
       },
@@ -1405,7 +1431,7 @@ async function runBacktestUI() {
     if (accuracy && accSection) {
       renderAccuracyTable(accuracy.perAsset);
       renderIcChart(accuracy.icSeries, accuracy.meanIC);
-      renderMuScatter(accuracy.scatterPoints);
+      renderQuintileChart(accuracy.quintileStats);
       accSection.style.display = 'flex';
     }
 

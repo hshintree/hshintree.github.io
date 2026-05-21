@@ -733,8 +733,8 @@
             <canvas id="ic-chart" aria-label="IC over time"></canvas>
           </div>
           <div class="acc-chart-wrap">
-            <p class="chart-title">Realized vs Predicted μ (annualised, x = realized)</p>
-            <canvas id="mu-scatter" aria-label="Predicted vs realized mu scatter"></canvas>
+            <p class="chart-title">Forecast Quintile Analysis (Q1 = lowest predicted return)</p>
+            <canvas id="mu-scatter" aria-label="Forecast quintile calibration chart"></canvas>
           </div>
         </div>
       </section>
@@ -807,9 +807,13 @@
     assets at each rebalance. Positive IC = the ordering was correct
     (assets the model ranked higher actually did better).
 
-  Realized vs Predicted &mu;: scatter of every (asset, rebalance-date)
-    pair. Points along the diagonal = perfect forecasts. Hover to see
-    which asset and rebalance period each point represents.
+  Forecast Quintile Analysis: at each rebalance date assets are ranked
+    by predicted &mu; and sorted into five bins (Q1 = lowest 20%
+    predicted, Q5 = highest 20% predicted). The bar shows the average
+    realized annualised return for assets in each bin, averaged across
+    all rebalance periods. If the model has directional skill the bars
+    should rise from Q1 to Q5. Hover a bar for the exact value and
+    observation count.
 
 &#x2500;&#x2500;&#x2500; Limitations &amp; Interpretation &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
 
